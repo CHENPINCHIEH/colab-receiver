@@ -112,12 +112,11 @@ const touchControls = cast.framework.ui.Controls.getInstance();
 const playerData = new cast.framework.ui.PlayerData();
 const playerDataBinder = new cast.framework.ui.PlayerDataBinder(playerData);
 
-let browseItems = getBrowseItems();
+let browseContent = new cast.framework.ui.BrowseContent();
 
-function getBrowseItems() {
-  let browseItems = [];
-  makeRequest('GET', SAMPLE_URL)
+makeRequest('GET', SAMPLE_URL)
   .then(function (data) {
+    let browseItems = [];
     for (let key in data) {
       let item = new cast.framework.ui.BrowseItem();
       item.entity = key;
@@ -127,30 +126,27 @@ function getBrowseItems() {
       item.imageType = cast.framework.ui.BrowseImageType.MOVIE;
       browseItems.push(item);
     }
-  });
-  return browseItems;
-}
+    
+    browseContent.title = 'Up Next';
+    browseContent.items = browseItems;
+    browseContent.targetAspectRatio =
+      cast.framework.ui.BrowseImageAspectRatio.LANDSCAPE_16_TO_9;
 
-let browseContent = new cast.framework.ui.BrowseContent();
-browseContent.title = 'Up Next';
-browseContent.items = browseItems;
-browseContent.targetAspectRatio =
-  cast.framework.ui.BrowseImageAspectRatio.LANDSCAPE_16_TO_9;
+    playerDataBinder.addEventListener(
+      cast.framework.ui.PlayerDataEventType.MEDIA_CHANGED,
+      (e) => {
+        if (!e.value) return;
 
-playerDataBinder.addEventListener(
-  cast.framework.ui.PlayerDataEventType.MEDIA_CHANGED,
-  (e) => {
-    if (!e.value) return;
+        // Media browse
+        touchControls.setBrowseContent(browseContent);
 
-    // Media browse
-    touchControls.setBrowseContent(browseContent);
-
-    // Clear default buttons and re-assign
-    touchControls.clearDefaultSlotAssignments();
-    touchControls.assignButton(
-      cast.framework.ui.ControlsSlot.SLOT_PRIMARY_1,
-      cast.framework.ui.ControlsButton.SEEK_BACKWARD_30
-    );
+        // Clear default buttons and re-assign
+        touchControls.clearDefaultSlotAssignments();
+        touchControls.assignButton(
+          cast.framework.ui.ControlsSlot.SLOT_PRIMARY_1,
+          cast.framework.ui.ControlsButton.SEEK_BACKWARD_30
+        );
+      });
   });
 
 context.start();

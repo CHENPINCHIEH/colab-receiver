@@ -31,14 +31,25 @@ castDebugLogger.loggerLevelByTags = {
 };
 
 async function makeRequest(method, url) {
-  const response = await fetch(url, { method });
-  if (!response.ok) {
+  try {
+    const response = await fetch(url, { method });
+    if (!response.ok) {
+      throw {
+        status: response.status,
+        statusText: response.statusText
+      };
+    }
+    return await response.json();
+  } catch (error) {
+    castDebugLogger.error(LOG_TAG, 'makeRequest failed:', error);
+    if (error.status !== undefined) {
+      throw error;
+    }
     throw {
-      status: response.status,
-      statusText: response.statusText
+      status: 0,
+      statusText: error.message || 'Unknown error'
     };
   }
-  return response.json();
 }
 
 playerManager.setMessageInterceptor(
@@ -51,41 +62,46 @@ playerManager.setMessageInterceptor(
       request.media.contentId = request.media.entity;
     }
 
-    // Fetch repository metadata
-    const data = await makeRequest('GET', SAMPLE_URL);
-    
-    // Obtain resources by contentId from downloaded repository metadata.
-    let item = data[request.media.contentId];
-    if (!item) {
-      // Content could not be found in repository
-      castDebugLogger.error(LOG_TAG, 'Content not found');
-      throw undefined;
+    try {
+      // Fetch repository metadata
+      const data = await makeRequest('GET', SAMPLE_URL);
+      
+      // Obtain resources by contentId from downloaded repository metadata.
+      let item = data[request.media.contentId];
+      if (!item) {
+        // Content could not be found in repository
+        castDebugLogger.error(LOG_TAG, 'Content not found');
+        throw undefined;
+      }
+
+      // Adjusting request to make requested content playable
+      request.media.contentType = TEST_STREAM_TYPE;
+
+      // Configure player to parse DASH content
+      if (TEST_STREAM_TYPE == StreamType.DASH) {
+        request.media.contentUrl = item.stream.dash;
+      }
+      // Configure player to parse HLS content
+      else if (TEST_STREAM_TYPE == StreamType.HLS) {
+        request.media.contentUrl = item.stream.hls;
+        request.media.hlsSegmentFormat = cast.framework.messages.HlsSegmentFormat.FMP4;
+        request.media.hlsVideoSegmentFormat = cast.framework.messages.HlsVideoSegmentFormat.FMP4;
+      }
+
+      castDebugLogger.warn(LOG_TAG, 'Playable URL:', request.media.contentUrl);
+
+      // Add metadata
+      let metadata = new cast.framework.messages.GenericMediaMetadata();
+      metadata.title = item.title;
+      metadata.subtitle = item.author;
+
+      request.media.metadata = metadata;
+
+      return request;
+    } catch (error) {
+      castDebugLogger.error(LOG_TAG, 'Error in message interceptor:', error);
+      throw error;
     }
-
-    // Adjusting request to make requested content playable
-    request.media.contentType = TEST_STREAM_TYPE;
-
-    // Configure player to parse DASH content
-    if (TEST_STREAM_TYPE == StreamType.DASH) {
-      request.media.contentUrl = item.stream.dash;
-    }
-    // Configure player to parse HLS content
-    else if (TEST_STREAM_TYPE == StreamType.HLS) {
-      request.media.contentUrl = item.stream.hls;
-      request.media.hlsSegmentFormat = cast.framework.messages.HlsSegmentFormat.FMP4;
-      request.media.hlsVideoSegmentFormat = cast.framework.messages.HlsVideoSegmentFormat.FMP4;
-    }
-
-    castDebugLogger.warn(LOG_TAG, 'Playable URL:', request.media.contentUrl);
-
-    // Add metadata
-    let metadata = new cast.framework.messages.GenericMediaMetadata();
-    metadata.title = item.title;
-    metadata.subtitle = item.author;
-
-    request.media.metadata = metadata;
-
-    return request;
   });
 
 // Optimizing for smart displays
@@ -98,16 +114,20 @@ let browseItems = getBrowseItems();
 function getBrowseItems() {
   let browseItems = [];
   (async () => {
-    const data = await makeRequest('GET', SAMPLE_URL);
-    Object.entries(data).forEach(([key, value]) => {
-      let item = new cast.framework.ui.BrowseItem();
-      item.entity = key;
-      item.title = value.title;
-      item.subtitle = value.description;
-      item.image = new cast.framework.messages.Image(value.poster);
-      item.imageType = cast.framework.ui.BrowseImageType.MOVIE;
-      browseItems.push(item);
-    });
+    try {
+      const data = await makeRequest('GET', SAMPLE_URL);
+      Object.entries(data).forEach(([key, value]) => {
+        let item = new cast.framework.ui.BrowseItem();
+        item.entity = key;
+        item.title = value.title;
+        item.subtitle = value.description;
+        item.image = new cast.framework.messages.Image(value.poster);
+        item.imageType = cast.framework.ui.BrowseImageType.MOVIE;
+        browseItems.push(item);
+      });
+    } catch (error) {
+      castDebugLogger.error(LOG_TAG, 'Failed to get browse items:', error);
+    }
   })();
   return browseItems;
 }

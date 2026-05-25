@@ -9,7 +9,6 @@ const StreamType = {
 }
 const TEST_STREAM_TYPE = StreamType.DASH
 
-
 // Debug Logger
 const castDebugLogger = cast.debug.CastDebugLogger.getInstance();
 const LOG_TAG = 'MyAPP.LOG';
@@ -28,36 +27,23 @@ castDebugLogger.loggerLevelByEvents = {
 
 // Set verbosity level for custom tags.
 castDebugLogger.loggerLevelByTags = {
-    LOG_TAG: cast.framework.LoggerLevel.DEBUG,
+  LOG_TAG: cast.framework.LoggerLevel.DEBUG,
 };
 
-function makeRequest (method, url) {
-  return new Promise(function (resolve, reject) {
-    let xhr = new XMLHttpRequest();
-    xhr.open(method, url);
-    xhr.onload = function () {
-      if (this.status >= 200 && this.status < 300) {
-        resolve(JSON.parse(xhr.response));
-      } else {
-        reject({
-          status: this.status,
-          statusText: xhr.statusText
-        });
-      }
+async function makeRequest(method, url) {
+  const response = await fetch(url, { method });
+  if (!response.ok) {
+    throw {
+      status: response.status,
+      statusText: response.statusText
     };
-    xhr.onerror = function () {
-      reject({
-        status: this.status,
-        statusText: xhr.statusText
-      });
-    };
-    xhr.send();
-  });
+  }
+  return response.json();
 }
 
 playerManager.setMessageInterceptor(
   cast.framework.messages.MessageType.LOAD,
-  request => {
+  async request => {
     castDebugLogger.info(LOG_TAG, 'Intercepting LOAD request');
 
     // Map contentId to entity
@@ -65,46 +51,41 @@ playerManager.setMessageInterceptor(
       request.media.contentId = request.media.entity;
     }
 
-    return new Promise((resolve, reject) => {
-      // Fetch repository metadata
-      makeRequest('GET', SAMPLE_URL)
-        .then(function (data) {
-          // Obtain resources by contentId from downloaded repository metadata.
-          let item = data[request.media.contentId];
-          if(!item) {
-            // Content could not be found in repository
-            castDebugLogger.error(LOG_TAG, 'Content not found');
-            reject();
-          } else {
-            // Adjusting request to make requested content playable
-            request.media.contentType = TEST_STREAM_TYPE;
+    // Fetch repository metadata
+    const data = await makeRequest('GET', SAMPLE_URL);
+    
+    // Obtain resources by contentId from downloaded repository metadata.
+    let item = data[request.media.contentId];
+    if (!item) {
+      // Content could not be found in repository
+      castDebugLogger.error(LOG_TAG, 'Content not found');
+      throw undefined;
+    }
 
-            // Configure player to parse DASH content
-            if(TEST_STREAM_TYPE == StreamType.DASH) {
-              request.media.contentUrl = item.stream.dash;
-            }
+    // Adjusting request to make requested content playable
+    request.media.contentType = TEST_STREAM_TYPE;
 
-            // Configure player to parse HLS content
-            else if(TEST_STREAM_TYPE == StreamType.HLS) {
-              request.media.contentUrl = item.stream.hls
-              request.media.hlsSegmentFormat = cast.framework.messages.HlsSegmentFormat.FMP4;
-              request.media.hlsVideoSegmentFormat = cast.framework.messages.HlsVideoSegmentFormat.FMP4;
-            }
-            
-            castDebugLogger.warn(LOG_TAG, 'Playable URL:', request.media.contentUrl);
-            
-            // Add metadata
-            let metadata = new cast.framework.messages.GenericMediaMetadata();
-            metadata.title = item.title;
-            metadata.subtitle = item.author;
+    // Configure player to parse DASH content
+    if (TEST_STREAM_TYPE == StreamType.DASH) {
+      request.media.contentUrl = item.stream.dash;
+    }
+    // Configure player to parse HLS content
+    else if (TEST_STREAM_TYPE == StreamType.HLS) {
+      request.media.contentUrl = item.stream.hls;
+      request.media.hlsSegmentFormat = cast.framework.messages.HlsSegmentFormat.FMP4;
+      request.media.hlsVideoSegmentFormat = cast.framework.messages.HlsVideoSegmentFormat.FMP4;
+    }
 
-            request.media.metadata = metadata;
+    castDebugLogger.warn(LOG_TAG, 'Playable URL:', request.media.contentUrl);
 
-            // Resolve request
-            resolve(request);
-          }
-      });
-    });
+    // Add metadata
+    let metadata = new cast.framework.messages.GenericMediaMetadata();
+    metadata.title = item.title;
+    metadata.subtitle = item.author;
+
+    request.media.metadata = metadata;
+
+    return request;
   });
 
 // Optimizing for smart displays
@@ -112,11 +93,12 @@ const touchControls = cast.framework.ui.Controls.getInstance();
 const playerData = new cast.framework.ui.PlayerData();
 const playerDataBinder = new cast.framework.ui.PlayerDataBinder(playerData);
 
-let browseContent = new cast.framework.ui.BrowseContent();
+let browseItems = getBrowseItems();
 
-makeRequest('GET', SAMPLE_URL)
-  .then(function (data) {
-    let browseItems = [];
+function getBrowseItems() {
+  let browseItems = [];
+  (async () => {
+    const data = await makeRequest('GET', SAMPLE_URL);
     for (let key in data) {
       let item = new cast.framework.ui.BrowseItem();
       item.entity = key;
@@ -126,27 +108,30 @@ makeRequest('GET', SAMPLE_URL)
       item.imageType = cast.framework.ui.BrowseImageType.MOVIE;
       browseItems.push(item);
     }
-    
-    browseContent.title = 'Up Next';
-    browseContent.items = browseItems;
-    browseContent.targetAspectRatio =
-      cast.framework.ui.BrowseImageAspectRatio.LANDSCAPE_16_TO_9;
+  })();
+  return browseItems;
+}
 
-    playerDataBinder.addEventListener(
-      cast.framework.ui.PlayerDataEventType.MEDIA_CHANGED,
-      (e) => {
-        if (!e.value) return;
+let browseContent = new cast.framework.ui.BrowseContent();
+browseContent.title = 'Up Next';
+browseContent.items = browseItems;
+browseContent.targetAspectRatio =
+  cast.framework.ui.BrowseImageAspectRatio.LANDSCAPE_16_TO_9;
 
-        // Media browse
-        touchControls.setBrowseContent(browseContent);
+playerDataBinder.addEventListener(
+  cast.framework.ui.PlayerDataEventType.MEDIA_CHANGED,
+  (e) => {
+    if (!e.value) return;
 
-        // Clear default buttons and re-assign
-        touchControls.clearDefaultSlotAssignments();
-        touchControls.assignButton(
-          cast.framework.ui.ControlsSlot.SLOT_PRIMARY_1,
-          cast.framework.ui.ControlsButton.SEEK_BACKWARD_30
-        );
-      });
+    // Media browse
+    touchControls.setBrowseContent(browseContent);
+
+    // Clear default buttons and re-assign
+    touchControls.clearDefaultSlotAssignments();
+    touchControls.assignButton(
+      cast.framework.ui.ControlsSlot.SLOT_PRIMARY_1,
+      cast.framework.ui.ControlsButton.SEEK_BACKWARD_30
+    );
   });
 
 context.start();

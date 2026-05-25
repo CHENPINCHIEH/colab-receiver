@@ -99,15 +99,15 @@ function getBrowseItems() {
   let browseItems = [];
   (async () => {
     const data = await makeRequest('GET', SAMPLE_URL);
-    for (let key in data) {
+    Object.entries(data).forEach(([key, value]) => {
       let item = new cast.framework.ui.BrowseItem();
       item.entity = key;
-      item.title = data[key].title;
-      item.subtitle = data[key].description;
-      item.image = new cast.framework.messages.Image(data[key].poster);
+      item.title = value.title;
+      item.subtitle = value.description;
+      item.image = new cast.framework.messages.Image(value.poster);
       item.imageType = cast.framework.ui.BrowseImageType.MOVIE;
       browseItems.push(item);
-    }
+    });
   })();
   return browseItems;
 }

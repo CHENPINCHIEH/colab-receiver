@@ -56,6 +56,8 @@ playerManager.setMessageInterceptor(
   cast.framework.messages.MessageType.LOAD,
   async request => {
     castDebugLogger.info(LOG_TAG, 'Intercepting LOAD request');
+    // 💡 在這裡直接抓取並印出 SDK 版本
+castDebugLogger.info(LOG_TAG, "== [Cast SDK Version] ==" + cast.framework.VERSION);
 
     // Map contentId to entity
     if (request.media && request.media.entity) {
